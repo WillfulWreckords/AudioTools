@@ -38,7 +38,7 @@ FORDER=3;                   %Filter order
 FC = 250;                   %Cutoff Frequescy
 
 %Compression Params Brickwall...
-THRESHOLD=1;                %-10dB threshold
+THRESHOLD=-10;                %-10dB threshold
 RATIO=100;                  %100:1 ratio
 LOOKAHEAD=0;                %lookahead time (ms)
 LOOKSIZE=10;                %RMS computation window size (ms)
@@ -265,9 +265,11 @@ for i=1:length(fileList)
     
     [status,message,messageid] =  mkdir([d,'Master95Outputs',filesep]);
     
-    [wavo fs nbits] = wavread(file);
+    %[wavo fs nbits] = wavread(file);
+    [wavo fs] = audioread(file);
     
-    wavwrite(wavo,fs,[d,'Master95Outputs',filesep,'in_',fn]);
+    %wavwrite(wavo,fs,[d,'Master95Outputs',filesep,'in_',fn]);
+    audiowrite([d,'Master95Outputs',filesep,'in_',fn],wavo,fs);
     
     wav = wavo / max(max(abs(wavo)))*.5;
     
