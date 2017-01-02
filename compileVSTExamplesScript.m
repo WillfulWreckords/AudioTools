@@ -1,3 +1,4 @@
+%MATLAB Examples
 generateAudioPlugin audiopluginexample.BassEnhancer
 generateAudioPlugin audiopluginexample.Chorus
 generateAudioPlugin audiopluginexample.DampedVolumeController
@@ -9,3 +10,6 @@ generateAudioPlugin audiopluginexample.ParametricEqualizerWithUDP
 generateAudioPlugin audiopluginexample.PitchShifter
 generateAudioPlugin audiopluginexample.ShelvingEqualizer
 generateAudioPlugin audiopluginexample.VarSlopeBandpassFilter
+
+%Custom Plugins
+generateAudioPlugin vstCompressorMono
