@@ -6,8 +6,10 @@ classdef vstCompressorMono < audioPlugin
         release = 0;
         inputGain = 0;
         outputGain = 0;
+        autoMakeUp = true;
         kneeWidth = 1;
     end
+    
     properties (Constant)
         PluginInterface = audioPluginInterface(...
             audioPluginParameter('inputGain', ...
@@ -17,27 +19,30 @@ classdef vstCompressorMono < audioPlugin
             audioPluginParameter('threshold', ...
                 'DisplayName', 'Threshold', ...
                 'Label', '(dB)', ...
-                'Mapping', {'lin',-120.0,0.0}),...
+                'Mapping', {'lin',-30.0,0.0}),...
             audioPluginParameter('ratio', ...
                 'DisplayName', 'Ratio', ...
                 'Label', '(input/output)', ...
-                'Mapping', {'log',1,100000}),...
+                'Mapping', {'log',1,1000}),...
             audioPluginParameter('attack', ...
                 'DisplayName', 'Attack', ...
                 'Label', '(ms)', ...
-                'Mapping', {'lin',0,5000}),...
+                'Mapping', {'lin',0,500}),...
             audioPluginParameter('release', ...
                 'DisplayName', 'Release', ...
                 'Label', '(ms)', ...
-                'Mapping', {'lin',0,5000}),...
+                'Mapping', {'lin',0,500}),...
             audioPluginParameter('kneeWidth', ...
                 'DisplayName', 'Knee Width', ...
                 'Label', '(dB)', ...
                 'Mapping', {'lin',0.0,15.0}),...
             audioPluginParameter('outputGain', ...
-                'DisplayName', 'Output Giain', ...
+                'DisplayName', 'Output Gain', ...
                 'Label', '(dB)', ...
                 'Mapping', {'lin',-120.0,20.0}),...
+            audioPluginParameter('autoMakeUp', ...
+                'DisplayName', 'Auto Makeup Gain', ...
+                'Mapping', {'enum','off','on'}),...
             'PluginName','Compressor (Mono)',...
             'VendorName','Willful Wreckords, LLC',...
             'VendorVersion','1.0.0',...
@@ -45,25 +50,24 @@ classdef vstCompressorMono < audioPlugin
             'InputChannels',1,...
             'OutputChannels',1);
     end
+    
+    properties (Access = private)
+        lgain = 1;
+    end
     methods
         function out = process(plugin,in)
             
-            out = in*10^(plugin.inputGain/20);
+            ig = 10^(plugin.inputGain/20);
             
-            tdB = plugin.threshold;
-            threshold = 10^(tdB/20);
-            
-            kneeWidth = plugin.kneeWidth;
-            tmindB = tdB-kneeWidth/2;
-            tmaxdB = tdB+kneeWidth/2;
+            tmindB = plugin.threshold-plugin.kneeWidth/2;
+            tmaxdB = plugin.threshold+plugin.kneeWidth/2;
             tmin = 10^(tmindB/20);
             tmax = 10^(tmaxdB/20);
-            
-            ratio = plugin.ratio;
             
             % attack and release "per sample decay"
             tatt = plugin.attack * .001;
             trel = plugin.release * .001;
+            
             fs = getSampleRate(plugin);
             if tatt==0
                 att=0;
@@ -82,37 +86,59 @@ classdef vstCompressorMono < audioPlugin
             % 
             %  Also for multi-channel audio we can either compute the mono
             %  rms signal or use each channel independently.
-            rms = abs(out);
+            rms = abs(mean(in,2));
             env = rms;
-            if att~=0 || rel~=0
-                for i=2:length(rms)
-                        if(rms(i)>tmin)
-                            a = att;
-                        else
-                            a = rel;
-                        end
-                    env(i) = (1-a)*rms(i)+a*env(i-1);
-                end
-            end
-
+            
             %Find where the envelope signal is greater than the minimum
             idx = find(env>=tmin);
-            cgain = ones(size(out));
-            dbe = 20*log10(env(idx));
-            s = (1-1/ratio)*ones(size(dbe));
-            ev = (tmindB-dbe);
-            if kneeWidth > 0
-                sidx = dbe<=tmaxdB;
-                s(sidx) = s(sidx).*(dbe(sidx)-tmindB)/kneeWidth/2;
-                ev(~sidx) = tdB-dbe(~sidx);
+            cgain = ones(size(in));
+            if numel(idx) > 0
+                dbe = 20*log10(env(idx));
+                s = (1-1/plugin.ratio)*ones(size(dbe));
+                ev = (tmindB-dbe);
+                if plugin.kneeWidth > 0
+                    sidx = (dbe<=tmaxdB);
+                    if sum(sidx)>0
+                        s(sidx) = s(sidx).*(dbe(sidx)-tmindB)/plugin.kneeWidth/2;
+                        ev(~sidx) = plugin.threshold-dbe(~sidx);
+                    end
+                end
+                g = s.*ev;
+                for j=1:size(cgain,2)
+                    cgain(idx,j) = 10.^(g/20);
+                end
             end
-            g = s.*ev;
-            cgain(idx) = 10.^(g/20);
-
-            %Output gain factor
-            og = 10.^(plugin.outputGain/20);
+           
+            %Smooth the computed gain
+            if att~=0 || rel~=0
+                sgain = cgain;
+                if(cgain(1)>plugin.lgain)
+                    a = att;
+                else
+                    a = rel;
+                end
+                sgain(1) = (1-a)*cgain(1)+a*plugin.lgain;
+                
+                for i=2:length(rms)
+                    if(cgain(i)>cgain(i-1))
+                        a = att;
+                    else
+                        a = rel;
+                    end
+                    sgain(i) = (1-a)*cgain(i)+a*cgain(i-1);
+                end
+                cgain = sgain;
+            end
             
-            out = out.*cgain.*og;
+            %Output gain factor
+            if plugin.autoMakeUp
+                og = 1/(10.^((1-1/plugin.ratio)*plugin.threshold/40)); 
+            else
+                og = 10.^(plugin.outputGain/20);
+            end
+            out = in.*cgain.*ig.*og;
+            
+            plugin.lgain = cgain(end);
         end
         
         function set.inputGain(plugin, val)
@@ -135,8 +161,23 @@ classdef vstCompressorMono < audioPlugin
             plugin.attack = val;
         end
         
+        function set.autoMakeUp(plugin, val)
+            plugin.autoMakeUp = val;
+        end
+        
         function set.release(plugin, val)
             plugin.release = val;
-        end    
+        end
+        
+        %function reset(plugin)
+        %    plugin.threshold = -6.0;
+        %    plugin.ratio = 5;
+        %    plugin.attack = 0;
+        %    plugin.release = 0;
+        %    plugin.inputGain = 0;
+        %    plugin.outputGain = 0;
+        %    plugin.autoMakeUp = true;
+        %    plugin.kneeWidth = 1;
+        %end
     end
 end
